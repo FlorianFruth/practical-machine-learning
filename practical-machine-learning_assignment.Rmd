@@ -1,0 +1,118 @@
+#Prediction of exercise type with classification models  
+  
+## Executive summray  
+In this document, we will predict the type of exercise people are doing, using data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. For the prediction, we will employ different machine learning algorithms. The result is that most models perform similarly and and xgboost is the best models with an accuracy of 0.9932450 and thus an out of sample error of 0.006755.  
+  
+The data for this project was kindly provided by this source: http://groupware.les.inf.puc-rio.br/har.  
+
+## Data preparation  
+  
+Loading the data and splitting it into test, training, and validation set:
+```{r message=FALSE, warnings=FALSE}
+library(knitr)
+opts_chunk$set(message=FALSE,
+               warnings=FALSE,
+               tidy=TRUE,
+               echo=TRUE)
+library(caret)
+library(party)
+library(xgboost)
+library(e1071)
+setwd("~/CourseraDataScienceSpecialization/R/class8")
+train_dat <- read.csv("pml-training.csv", header = TRUE)
+test_dat <- read.csv("pml-testing.csv", header = TRUE)
+set.seed(115839)
+intrain <- createDataPartition(y = train_dat$classe, p = 0.6, list = FALSE)
+training <- train_dat[ intrain,]
+testing <- train_dat[ -intrain,]
+validating <- test_dat
+```
+
+Removing variables with near zero variance, removing the first six columns (because they contain variables which shouldn't be used for the prediction), and replacing NAs by 0:
+```{r}
+#remove columns with near zero variance:
+leaveout <- nearZeroVar(training)
+training <- training[, -leaveout]
+testing <- testing[, -leaveout]
+
+#replace NAs with 0:
+training[is.na(training)] <- 0 
+testing[is.na(testing)] <- 0 
+training <- training[, -c(1:6)]
+testing <- testing[, -c(1:6)]
+```
+  
+##Model prediction
+Now we will build different models to predict which exercise has been done. We use different types of models to explore if certain model types offer particular strengths in the given dataset. Furthermore, for each model we use 5-fold cross validation to avoid overfitting, and to balance bias and variance of the models.
+  
+### Model 1: Random forest
+```{r}
+set.seed(1242)
+mod_rf <- train(classe ~ ., data = training, method = "rf", metric = "Accuracy", trControl = trainControl(method = "cv", repeats = 5))
+pred_rf <- predict(mod_rf, testing)
+```
+
+###Model 2: Other random forest
+```{r}
+set.seed(1242)
+mod_rf2 <- randomForest(classe ~ ., data = training, ntree = 100, importance=TRUE)
+pred_rf2 <- predict(mod_rf2, testing)
+```
+
+### Model 3: Single tree: ctree
+```{r}
+set.seed(1242)
+mod_ctree <- train(classe ~ ., data = training, method="ctree", metric = "Accuracy", preProcess = c("center", "scale"), trControl = trainControl(method="cv", repeats = 5))
+pred_ctree <- predict(mod_ctree, testing)
+```
+
+### Model 4: Extreme gradient boosting: xgboost
+```{r}
+set.seed(1242)
+mod_xgb <- train(classe ~ ., data = training, method="xgbTree", 
+                 preProcess = c("center", "scale"),
+                 trControl = trainControl(method="cv", repeats = 5))
+pred_xgb <- predict(mod_xgb, testing)
+```
+
+### Model 5: Model stacking
+```{r}
+set.seed(1242)
+stackDF <- data.frame(predict(mod_rf, training), predict(mod_rf2, training), 
+                      predict(mod_ctree, training), predict(mod_xgb, training), classe = training$classe)
+colnames(stackDF) <- c("rf", "rf2", "ctree", "xgb", "classe")
+
+mod_stack <- train(classe ~ ., data = stackDF, method = "rf", metric = "Accuracy", 
+                    trControl = trainControl(method = "cv", repeats = 5))
+
+stackDFtest <- data.frame(pred_rf, pred_rf2, pred_ctree, pred_xgb, classe = testing$classe)
+colnames(stackDFtest) <- c("rf", "rf2", "ctree", "xgb", "classe")
+pred_stack <- predict(mod_stack, stackDFtest)
+```
+
+
+##Results 
+Here, we present the results of the above computed models. The results are as follows:
+```{r}
+confusionMatrix(pred_rf, testing$classe)$overall
+confusionMatrix(pred_rf2, testing$classe)$overall
+confusionMatrix(pred_ctree, testing$classe)$overall
+confusionMatrix(pred_xgb, testing$classe)$overall
+confusionMatrix(pred_stack, testing$classe)$overall
+```
+Conclusion: Evaluating the predictions on the test set, we see that the models perform similarly except for ctree. In particular, stacking does not improve test results. 
+The estimated out of sample error for the best model, xgboost, is 0.006755 = 1 - 0.9932450. 
+  
+##Prediction of the models on the second data set  
+Additionally, we also calculate the result of xgboost on the second data set, which we call here the validation set:
+
+```{r}  
+#data preparation of the validation set (as done before for the other data sets)
+validating <- validating[, -leaveout]
+validating <- validating[, -c(1:6)]
+validating[is.na(validating)] <- 0 
+
+#evaluation
+predict(mod_xgb, validating)
+```
+  
